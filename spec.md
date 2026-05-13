@@ -8,8 +8,8 @@
 **核心技術決策與挑戰排除：**
 
 1. **模組系統轉換：** 將 Express 預設的 CommonJS (`require`) 全面轉換為 ES Modules (`type: module`)，並修復 `__dirname` 路徑問題。
-2. **資料庫架構分離：**
-* 政府客觀數據與使用者輸入數據性質不同，決定分為兩張資料表：`milk_cpi` (通膨指數) 與 `milk_prices` (使用者回報價格)。
+2. **資料庫架構調整：**
+* 本專案目前以 `milk_cpi` 為主要資料表，儲存主計處的通膨指數與系統寫入的指數資料（`year`, `month`, `cpi`）。原先規劃的 `milk_prices`（使用者回報價格）未在 MVP 中獨立建立，系統採直接把轉換後的 CPI 寫入 `milk_cpi`。
 
 
 3. **主計處 JSON 資料清洗：**
@@ -18,8 +18,9 @@
 
 
 4. **防呆與防重複機制：**
-* 針對使用者輸入的資料，在 `milk_prices` 設定 `UNIQUE(date, product_name)`。
-* API 寫入時使用 `INSERT OR REPLACE` (UPSERT) 語法，達成「存在則更新，不存在則新增」的目標。
+* 目前的重複檢查採用 `year` + `month` 作為唯一判斷。當使用者透過 API 提交要新增的資料時，後端會先查詢相同 `year` 與 `month` 是否已存在：
+	- 若存在，API 會回傳 HTTP 409 與純文字訊息 `Duplicate entry`；
+	- 若不存在，才會執行 `INSERT`。MVP 尚未採用 UPSERT 或獨立的 `milk_prices` 表。
 
 
 5. **UI/UX 版面重構：** 為解決首頁版面過度空白的問題，決定引入 CSS 雙欄排版（Flexbox/Grid）。將「靜態歷史資料」與「動態資料輸入」左右分離，並將「核心推估功能」置頂，符合使用者視覺動線。
@@ -38,12 +39,8 @@
 * `cpi` (REAL): 通膨指數
 
 
-* **Table 2: `milk_prices` (使用者物價紀錄表)**
-* `id` (INTEGER PRIMARY KEY)
-* `date` (TEXT): 記錄日期
-* `product_name` (TEXT): 商品名稱
-* `price` (INTEGER): 價格
-* *Constraint: `UNIQUE(date, product_name)*`
+* **Table 2: `milk_prices` (使用者物價紀錄表) — *Planned***
+* 本表為原始設計構想，用以儲存使用者回報價格；但在目前的實作（MVP）中尚未建立。系統採取將使用者輸入價格於前端轉換為 CPI 後直接寫入 `milk_cpi`。
 
 
 
@@ -60,8 +57,9 @@
 
 
 3. **`POST /api/insert`**
-* 功能：新增或更新使用者回報的鮮奶價格。
-* 參數：`date`, `product_name`, `price` (放在 `req.body`)。
+* 功能：在 MVP 中，接受 `year`, `month`, `cpi`（由前端將使用者輸入的價格轉換後產生）並寫入 `milk_cpi`。
+* 傳入格式：JSON body，包含 `year` (number)、`month` (number，0 代表年總指數)、`cpi` (number)。
+* 回傳：僅回傳純文字訊息（非 JSON），成功時為 `Insert successful`，重複時回傳 HTTP 409 與 `Duplicate entry`。
 
 
 
@@ -77,8 +75,8 @@
 
 
 * **前端業務邏輯:**
-* **搜尋與推估 (`GET` Request):** 攔截表單 submit 事件，若 `month` 留空則預設賦值為 `0`。透過 `fetch` 呼叫 `/api/cpi/search`。價格換算公式：`Math.round(166 * (fetched_cpi / 100))`。
-* **資料寫入 (`POST` Request):** 攔截右下角表單 submit 事件，將資料打包為 JSON 發送至 `/api/insert`。捕捉後端 `UNIQUE` 限制拋出的錯誤，並在 UI 渲染紅色錯誤提示（例如：Duplicate entry）。
+* **搜尋與推估 (`GET` Request):** 攔截上方搜尋表單的 submit 事件，若 `month` 留空則預設為 `0`。透過 `fetch` 呼叫 `/api/cpi/search?year=...&month=...`，若有回傳資料則依據 `cpi` 計算推估價格：`Math.round(166 * (cpi / 100))`，並在下方顯示結果表格；若查無資料顯示友善提示 `查無此年月的通膨資料`。
+* **資料寫入 (`POST` Request):** 使用者在右側表單輸入「價格 (price)」，前端在送出前先以公式 `cpi = price / 166 * 100` 計算 CPI（四捨二位），然後把 `year, month, cpi` 以 JSON POST 到 `/api/insert`。API 回傳為純文字，前端依回傳訊息顯示綠色/紅色提示；若後端判定為重複則顯示 `Duplicate entry`（HTTP 409）。
 
 
 
@@ -94,14 +92,15 @@
 
 * [x] **資料庫建置 (`db.js`)**
 * [x] 安裝 `sqlite3` 套件。
-* [x] 撰寫建立 `milk_cpi` 與 `milk_prices` 資料表的 SQL 邏輯。
-* [x] 撰寫讀取主計處 JSON 檔案 (`fs` 模組)，並透過迴圈與 `db.prepare` 批次寫入資料的腳本。
+ * [x] 撰寫建立 `milk_cpi` 資料表的 SQL（`year INTEGER, month INTEGER, cpi REAL`）。
+ * [~] `milk_prices` 為原先設計構想，尚未建立（Planned）。
+ * [x] 寫入資料使用獨立匯入腳本 `scripts/import_cpi.mjs`，把 `db/cpi_data.json` 匯入 `milk_cpi`；原本 `db.js` 中的讀檔匯入函式已移除。
 
 
 * [x] **後端 API 開發 (`app.js`)**
 * [x] 實作 `GET /api/cpi`。
 * [x] 實作 `GET /api/cpi/search` 條件查詢。
-* [x] 實作 `POST /api/insert` 與 UPSERT 覆蓋邏輯。
+* [x] 實作 `POST /api/insert`（行為：檢查是否已有相同 `year`+`month`，若存在回傳 409 Duplicate entry；若不存在插入新筆）。
 * [x] 透過 Thunder Client 測試 API 端點，確認無 Server Refused 錯誤。
 
 
