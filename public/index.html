@@ -1,0 +1,116 @@
+<html>
+
+<head>
+  <title>Express</title>
+  <link rel="stylesheet" href="/stylesheets/style.css">
+</head>
+
+<body>
+  <h1>Express</h1>
+  <p>Welcome to Express</p>
+  
+  <section>
+    <h2>新增鮮奶指數</h2>
+    <form id="cpiForm">
+      <label for="year">年 (year)</label>
+      <input type="number" id="year" name="year" min="1900" required>
+
+      <label for="month">月 (month, 0 表示全年)</label>
+      <input type="number" id="month" name="month" min="0" max="12" value="0">
+
+      <label for="price">指數 (price / cpi)</label>
+      <input type="number" step="0.01" id="price" name="price" required>
+
+      <button type="submit">送出</button>
+    </form>
+
+    <div id="result" aria-live="polite" style="margin-top:12px"></div>
+  </section>
+
+  <section style="margin-top:24px">
+    <h2>所有鮮奶指數資料</h2>
+    <div id="cpiTableWrap">
+      <table id="cpiTable" border="1" cellpadding="4" cellspacing="0">
+        <thead>
+          <tr><th>year</th><th>month</th><th>cpi</th></tr>
+        </thead>
+        <tbody>
+        </tbody>
+      </table>
+    </div>
+    <div id="tableMsg" style="margin-top:8px;color:#666"></div>
+  </section>
+  <script>
+    // 不使用 action，改用 fetch 提交到 /api/insert（使用 async/await）
+    const form = document.getElementById('cpiForm');
+    const resultEl = document.getElementById('result');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      resultEl.textContent = '';
+      resultEl.style.color = '';
+
+      const year = parseInt(document.getElementById('year').value, 10);
+      const month = parseInt(document.getElementById('month').value, 10) || 0;
+      const cpi = parseFloat(document.getElementById('price').value);
+
+      try {
+        const res = await fetch('/api/insert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ year, month, cpi })
+        });
+        // API 回傳為純文字（text）
+        const text = await res.text();
+        if (!res.ok) {
+          resultEl.textContent = `錯誤: ${text}`;
+          resultEl.style.color = 'red';
+        } else {
+          resultEl.textContent = text; // 顯示伺服器回傳的純文字訊息
+          resultEl.style.color = 'green';
+          // 成功後重新載入 table
+          await loadCpiTable();
+        }
+      } catch (err) {
+        resultEl.textContent = 'Network error: ' + err.message;
+        resultEl.style.color = 'red';
+      }
+    });
+
+    // 載入 /api/cpi 並在 table 中顯示資料
+    async function loadCpiTable() {
+      const msgEl = document.getElementById('tableMsg');
+      msgEl.textContent = '載入中...';
+      try {
+        const res = await fetch('/api/cpi');
+        if (!res.ok) {
+          msgEl.textContent = '無法取得資料: ' + res.status;
+          return;
+        }
+        const json = await res.json();
+        const rows = Array.isArray(json.data) ? json.data : [];
+        const tbody = document.querySelector('#cpiTable tbody');
+        tbody.innerHTML = '';
+        if (rows.length === 0) {
+          msgEl.textContent = '目前沒有資料';
+          return;
+        }
+        msgEl.textContent = `共 ${rows.length} 筆`;
+        for (const r of rows) {
+          const tr = document.createElement('tr');
+          const y = document.createElement('td'); y.textContent = r.year;
+          const m = document.createElement('td'); m.textContent = r.month;
+          const c = document.createElement('td'); c.textContent = r.cpi;
+          tr.appendChild(y); tr.appendChild(m); tr.appendChild(c);
+          tbody.appendChild(tr);
+        }
+      } catch (err) {
+        document.getElementById('tableMsg').textContent = 'Network error: ' + err.message;
+      }
+    }
+
+    // initial load
+    loadCpiTable();
+  </script>
+</body>
+
+</html>
