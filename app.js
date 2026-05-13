@@ -7,8 +7,10 @@ import indexRouter from './routes/index.js';
 import usersRouter from './routes/users.js';
 import { fileURLToPath } from 'url';
 import sqlite3 from 'sqlite3';
+import cors from 'cors';
 
 const app = express();
+app.use(cors());
 
 app.use(logger('dev'));
 app.use(express.json());
@@ -115,6 +117,3 @@ app.use('/', indexRouter);
 app.use('/users', usersRouter);
 
 export default app;
-
-const cors = require("cors");
-app.use(cors());
